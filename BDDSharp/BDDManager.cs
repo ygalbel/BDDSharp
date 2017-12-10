@@ -600,6 +600,28 @@ namespace UCLouvain.BDDSharp
         }
 
         /// <summary>
+        /// Perform Not operation
+        /// </summary>
+        /// <param name="g"></param>
+        /// <returns></returns>
+        public BDDNode Not(BDDNode g)
+        {
+            return ITE(g, Zero, One);
+        }
+
+        /// <summary>
+        /// Peform Equal Operator between two nodes.
+        /// Use XNOR function
+        /// </summary>
+        /// <param name="f"></param>
+        /// <param name="g"></param>
+        /// <returns></returns>
+        public BDDNode Equal(BDDNode f, BDDNode g)
+        {
+            return ITE(f, g, Not(g));
+        }
+
+        /// <summary>
         /// Performs the If-Then-Else operation on nodes <c>f</c>, <c>g</c>, 
         /// <c>h</c>.
         /// </summary>
