@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -100,7 +101,7 @@ namespace UCLouvain.BDDSharp
             this.One = Create(n, true);
             
             _n = n;
-            _ite_cache = new Dictionary<Tuple<int, int, int>, WeakReference>();
+            _ite_cache = new ConcurrentDictionary<Tuple<int, int, int>, WeakReference>();
             _variable_order = new List<int>(Enumerable.Range(0, n));
             if (_variable_order.Count() != n)
                 throw new ArgumentException();
@@ -629,9 +630,10 @@ namespace UCLouvain.BDDSharp
                 return g;
 
             var cache_key = new Tuple<int, int, int>(f.Id, g.Id, h.Id);
-            if (_ite_cache.ContainsKey(cache_key))
+            WeakReference wr;
+
+            if (_ite_cache.TryGetValue(cache_key, out wr))
             {
-                WeakReference wr = _ite_cache[cache_key];
                 if (wr.IsAlive) return (BDDNode)wr.Target;
                 else _ite_cache.Remove(cache_key);
             }
