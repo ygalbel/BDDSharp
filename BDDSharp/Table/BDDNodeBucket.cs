@@ -171,9 +171,9 @@ namespace UCLouvain.BDDSharp.Table
             {
                 if (index == x.index && low == x.low && high == x.high)
                 {
-                    if (x.val.IsAlive)
-                        throw new BDDNodeBucketException(
-                            "Trying to replace an alive reference.");
+                    //if (x.val.IsAlive)
+                    //    throw new BDDNodeBucketException(
+                    //        "Trying to replace an alive reference.");
                     x.val = new WeakReference(val);
                     return;
                 }

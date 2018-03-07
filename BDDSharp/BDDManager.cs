@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.IO;
 using System.Numerics;
+using System.Threading.Tasks;
 using UCLouvain.BDDSharp.Table;
 
 namespace UCLouvain.BDDSharp
@@ -47,7 +49,7 @@ namespace UCLouvain.BDDSharp
 
         const int MIN_INIT_SIZE = 4;
         object unique_table_lock = new object();
-        UniqueTable[] unique_table;
+        ConcurrentDictionary<int, UniqueTable> unique_table;
 
         /// <summary>
         /// The max growth factor used in Sifting algorithm.
@@ -81,11 +83,11 @@ namespace UCLouvain.BDDSharp
             }
         }
 
-		/// <summary>
-		/// Gets or sets the function returning the string corresponding the
+        /// <summary>
+        /// Gets or sets the function returning the string corresponding the
         /// variable at index. This is used for debugging purpose.
-		/// </summary>
-		/// <value>The string corresponding to the variable.</value>
+        /// </summary>
+        /// <value>The string corresponding to the variable.</value>
         public Func<int, string> GetVariableString
         {
             get; set;
@@ -99,21 +101,21 @@ namespace UCLouvain.BDDSharp
         {
             this.Zero = Create(n, false);
             this.One = Create(n, true);
-            
+
             _n = n;
             _ite_cache = new ConcurrentDictionary<Tuple<int, int, int>, WeakReference>();
             _variable_order = new List<int>(Enumerable.Range(0, n));
             if (_variable_order.Count() != n)
                 throw new ArgumentException();
-            
+
             GetVariableString = (x) => x.ToString();
 
             lock (unique_table_lock)
             {
                 int size = (n > MIN_INIT_SIZE) ? n : MIN_INIT_SIZE;
-                unique_table = new UniqueTable[size];
-                for (int i = 0; i < unique_table.Length; i++)
-                    unique_table[i] = new UniqueTable();
+                unique_table = new ConcurrentDictionary<int, UniqueTable>();
+                //for (int i = 0; i < unique_table.Length; i++)
+                //    unique_table[i] = new UniqueTable();
             }
         }
 
@@ -167,19 +169,24 @@ namespace UCLouvain.BDDSharp
         public BDDNode Create(int index, BDDNode high, BDDNode low)
         {
             BDDNode unique;
-            lock (unique_table_lock)
+            if (unique_table.ContainsKey(index))
             {
                 unique = unique_table[index][index, low.Id, high.Id];
                 if (unique != null)
                     return unique;
             }
-            
+
             unique = new BDDNode(index, high, low) { Id = nextId++ };
             high.RefCount++;
             low.RefCount++;
-            
-            lock (unique_table_lock)
-                unique_table[index].Put(unique);
+
+            if (!unique_table.ContainsKey(index))
+            {
+                unique_table[index] = new UniqueTable();
+            }
+
+            unique_table[index].Put(unique);
+
             return unique;
         }
 
@@ -202,13 +209,13 @@ namespace UCLouvain.BDDSharp
         public int CreateVariable()
         {
 
-            lock (unique_table_lock)
-            {
-                if (N + 1 > unique_table.Length)
-                {
-                    ResizeUniqueTable(unique_table.Length * 2);
-                }
-            }
+            //lock (unique_table_lock)
+            //{
+            //    if (N + 1 > unique_table.Count)
+            //    {
+            //        ResizeUniqueTable(unique_table.Count * 2);
+            //    }
+            //}
 
             var temp = N;
             N++;
@@ -220,22 +227,22 @@ namespace UCLouvain.BDDSharp
         /// Resizes the unique table to the new specified size.
         /// </summary>
         /// <param name="new_size">New size of the unique table.</param>
-        void ResizeUniqueTable(int new_size)
-        {
+        //void ResizeUniqueTable(int new_size)
+        //{
 
-            lock (unique_table_lock)
-            {
-                var n = new UniqueTable[new_size];
-                for (int i = 0; i < new_size; i++)
-                {
-                    if (i < unique_table.Length)
-                        n[i] = unique_table[i];
-                    else
-                        n[i] = new UniqueTable();
-                }
-                unique_table = n;
-            }
-        }
+        //    lock (unique_table_lock)
+        //    {
+        //        var n = new List<UniqueTable>()[new_size];
+        //        for (int i = 0; i < new_size; i++)
+        //        {
+        //            if (i < unique_table.Count)
+        //                n[i] = unique_table[i];
+        //            else
+        //                n[i] = new UniqueTable();
+        //        }
+        //        unique_table = n;
+        //    }
+        //}
 
         /// <summary>
         /// Swap the specified variables
@@ -268,7 +275,7 @@ namespace UCLouvain.BDDSharp
             {
                 SwapStep(n, index, nextIndex);
             }
-            
+
             return node;
         }
 
@@ -280,7 +287,7 @@ namespace UCLouvain.BDDSharp
             if (node.Index != currentIndex)
             {
                 throw new Exception(
-                    string.Format("Got {0} and should be {1} in the unique table.", 
+                    string.Format("Got {0} and should be {1} in the unique table.",
                                   node.Index, currentIndex));
             }
 
@@ -331,36 +338,36 @@ namespace UCLouvain.BDDSharp
                 node.Index = nextIndex;
 
                 old_low = node.Low;
-				old_high = node.High;
-            
-				old_low.RefCount--;
-				if (node.Low.RefCount == 0)
-				{
-					DeleteNode(node.Low);
-				}
-				
-				old_high.RefCount--;
-				if (node.High.RefCount == 0)
-				{
-					DeleteNode(node.High);
-				}
-                
+                old_high = node.High;
+
+                old_low.RefCount--;
+                if (node.Low.RefCount == 0)
+                {
+                    DeleteNode(node.Low);
+                }
+
+                old_high.RefCount--;
+                if (node.High.RefCount == 0)
+                {
+                    DeleteNode(node.High);
+                }
+
                 node.SetHigh(a);
                 node.SetLow(b);
 
                 unique_table[nextIndex].Put(node);
             }
         }
-        
+
         /// <summary>
         /// Deletes the specified node.
         /// </summary>
         /// <param name="node">Node to delete.</param>
-        public void DeleteNode (BDDNode node)
+        public void DeleteNode(BDDNode node)
         {
             if (node.Value != null) return;
             if (node.RefCount != 0) return;
-            
+
             lock (unique_table_lock)
             {
                 unique_table[node.Index].Delete(node);
@@ -383,7 +390,7 @@ namespace UCLouvain.BDDSharp
         public BDDNode Sifting(BDDNode root)
         {
             var initial_size = GetSize(root);
-        
+
             var reverse_order = new int[N];
             for (int i = 0; i < N; i++)
                 reverse_order[_variable_order[i]] = i;
@@ -400,7 +407,7 @@ namespace UCLouvain.BDDSharp
                 {
                     cur_pos = j;
                     Swap(root, _variable_order[j], _variable_order[j + 1]);
-                    
+
                     var new_size = GetSize(root);
                     if (new_size < opt_size)
                     {
@@ -442,7 +449,7 @@ namespace UCLouvain.BDDSharp
             }
             return root;
         }
-        
+
         /// <summary>
         /// Returns the size of BDD.
         /// </summary>
@@ -541,6 +548,8 @@ namespace UCLouvain.BDDSharp
             return subgraph[root.Id];
         }
 
+        private static object locker2 = new object();
+
         /// <summary>
         /// Restrict the specified bdd using the <c>positive</c> and 
         /// <c>negative</c> sets.
@@ -549,15 +558,14 @@ namespace UCLouvain.BDDSharp
         /// <param name="positive">Index of positive variable.</param>
         /// <param name="negative">Index of negative variable.</param>
         /// <param name="cache">Cache.</param>
-        public BDDNode Restrict(BDDNode n, int positive, int negative, BDDNode[] cache = null)
+        public BDDNode Restrict(BDDNode n, int positive, int negative, ConcurrentDictionary<int, BDDNode> cache)
         {
+
             if (n.Value != null)
                 return n;
 
             BDDNode cached;
-            if (cache == null)
-                cache = new BDDNode[nextId];
-            else if ((cached = cache[n.Id]) != null)
+            if (cache.TryGetValue(n.Id, out cached))
                 return cached;
 
             BDDNode ret;
@@ -571,8 +579,16 @@ namespace UCLouvain.BDDSharp
             }
             else
             {
-                n.Low = Restrict(n.Low, positive, negative, cache);
-                n.High = Restrict(n.High, positive, negative, cache);
+                Parallel.Invoke(() =>
+                {
+                    n.Low = Restrict(n.Low, positive, negative, cache);
+                },
+                    () =>
+                {
+                    n.High = Restrict(n.High, positive, negative, cache);
+                });
+
+
                 ret = n;
                 cache[n.Id] = ret;
             }
@@ -609,6 +625,7 @@ namespace UCLouvain.BDDSharp
         /// <param name="h">Node.</param>
         public BDDNode ITE(BDDNode f, BDDNode g, BDDNode h)
         {
+
             // ite(f, 1, 0) = f
             if (g.IsOne & h.IsZero)
                 return f;
@@ -629,7 +646,10 @@ namespace UCLouvain.BDDSharp
             if (g == h)
                 return g;
 
+            Debug.WriteLine($"{_ite_cache.Count}, {f.Id}, {g.Id}, {h.Id}");
             var cache_key = new Tuple<int, int, int>(f.Id, g.Id, h.Id);
+
+
             WeakReference wr;
 
             if (_ite_cache.TryGetValue(cache_key, out wr))
@@ -644,17 +664,35 @@ namespace UCLouvain.BDDSharp
             if (h.Index < index)
                 index = h.Index;
 
-            var fv0 = Restrict(f, -1, index);
-            var gv0 = Restrict(g, -1, index);
-            var hv0 = Restrict(h, -1, index);
 
-            var fv1 = Restrict(f, index, -1);
-            var gv1 = Restrict(g, index, -1);
-            var hv1 = Restrict(h, index, -1);
+            BDDNode fv0 = null;
+            BDDNode gv0 = null;
+            BDDNode hv0 = null;
+            BDDNode fv1 = null;
+            BDDNode gv1 = null;
+            BDDNode hv1 = null;
 
-            BDDNode node = Create(index, 
-                                  ITE(fv1, gv1, hv1), 
-                                  ITE(fv0, gv0, hv0));
+            var restrictCache = new ConcurrentDictionary<int, BDDNode>();
+
+
+            Parallel.Invoke(
+            () => { fv0 = Restrict(f, -1, index, restrictCache); },
+            () => { gv0 = Restrict(g, -1, index, restrictCache); },
+            () => { hv0 = Restrict(h, -1, index, restrictCache); },
+            () => { fv1 = Restrict(f, index, -1, restrictCache); },
+            () => { gv1 = Restrict(g, index, -1, restrictCache); },
+            () => { hv1 = Restrict(h, index, -1, restrictCache); }
+        );
+
+            BDDNode ite1 = null;
+            BDDNode ite2 = null;
+
+            Parallel.Invoke(
+                () => { ite1 = ITE(fv1, gv1, hv1); },
+                () => { ite2 = ITE(fv0, gv0, hv0); });
+
+            BDDNode node = Create(index, ite1, ite2);
+
             _ite_cache[cache_key] = new WeakReference(node);
             return node;
         }
@@ -676,63 +714,63 @@ namespace UCLouvain.BDDSharp
         /// Returns the dot representation of the given node.
         /// </summary>
         /// <returns>The dot code.</returns>
-        public string ToDot(BDDNode root, 
+        public string ToDot(BDDNode root,
                             Func<BDDNode, string> labelFunction = null,
                             bool show_all = true)
         {
             lock (unique_table_lock)
             {
-	            var nodes = root.Nodes;
-	            var t = new StringBuilder("digraph G {\n");
-	
-	            if (labelFunction == null)
-	                labelFunction = (x) => GetVariableString(x.Index);
-	
-	            for (int i = 0; i < N; i++)
-	            {
-	                t.Append($"\tsubgraph cluster_box_{i} {{\n");
-	                t.Append("\tstyle=invis;\n");
-	                //foreach (var n in nodes.Where(x => x.Index == i))
-	                foreach (var n in unique_table[i].Nodes())
-	                {
-	                    var color = "grey";
-	                    if (nodes.Contains(n))
-	                    {
-	                        color = "black";
-	                    }
+                var nodes = root.Nodes;
+                var t = new StringBuilder("digraph G {\n");
+
+                if (labelFunction == null)
+                    labelFunction = (x) => GetVariableString(x.Index);
+
+                for (int i = 0; i < unique_table.Count; i++)
+                {
+                    t.Append($"\tsubgraph cluster_box_{i} {{\n");
+                    t.Append("\tstyle=invis;\n");
+                    //foreach (var n in nodes.Where(x => x.Index == i))
+                    foreach (var n in unique_table[i].Nodes())
+                    {
+                        var color = "grey";
+                        if (nodes.Contains(n))
+                        {
+                            color = "black";
+                        }
 
                         if (show_all || nodes.Contains(n))
-		                    t.Append($"\t\t{n.Id} [label=\"{labelFunction(n)}\", " 
-		                              + $"color=\"{color}\"];\n");
-	                }
-	                t.Append("\t}\n");
-	            }
-	
-	            t.Append("\tsubgraph cluster_box_sink {\n");
-	            t.Append($"\t{Zero.Id} [shape=box,label=\"0 ({Zero.RefCount})\"];\n");
-	            t.Append($"\t{One.Id} [shape=box,label=\"1 ({One.RefCount})\"];\n");
-	            t.Append("\t}\n");
-	
-	            //foreach (var n in nodes)
-	            for (int i = 0; i < N; i++)
-	            {
-	                foreach (var n in unique_table[i].Nodes())
-	                {
-	                    var color = "grey";
-	                    if (nodes.Contains(n))
-	                    {
-	                        color = "black";
-	                    }
-	                    if (n.Index < N && (show_all || nodes.Contains(n)))
-	                    {
-	                        t.Append($"\t{n.Id} -> {n.High.Id} [color=\"{color}\"];\n");
-	                        t.Append($"\t{n.Id} -> {n.Low.Id} [style=dotted,color=\"{color}\"];\n");
-	                    }
-	                }
-	            }
-	            t.Append("}");
-	            return t.ToString();
-	        }
+                            t.Append($"\t\t{n.Id} [label=\"{labelFunction(n)}\", "
+                                      + $"color=\"{color}\"];\n");
+                    }
+                    t.Append("\t}\n");
+                }
+
+                t.Append("\tsubgraph cluster_box_sink {\n");
+                t.Append($"\t{Zero.Id} [shape=box,label=\"0 ({Zero.RefCount})\"];\n");
+                t.Append($"\t{One.Id} [shape=box,label=\"1 ({One.RefCount})\"];\n");
+                t.Append("\t}\n");
+
+                //foreach (var n in nodes)
+                for (int i = 0; i < unique_table.Count; i++)
+                {
+                    foreach (var n in unique_table[i].Nodes())
+                    {
+                        var color = "grey";
+                        if (nodes.Contains(n))
+                        {
+                            color = "black";
+                        }
+                        if (n.Index < N && (show_all || nodes.Contains(n)))
+                        {
+                            t.Append($"\t{n.Id} -> {n.High.Id} [color=\"{color}\"];\n");
+                            t.Append($"\t{n.Id} -> {n.Low.Id} [style=dotted,color=\"{color}\"];\n");
+                        }
+                    }
+                }
+                t.Append("}");
+                return t.ToString();
+            }
         }
     }
 }
